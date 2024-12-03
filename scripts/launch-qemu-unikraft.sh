@@ -4,7 +4,8 @@
 #
 # user changeable parameters
 #
-HDA_FILE="./guest.qcow2"
+#HDA_FILE="./guest.qcow2"
+HDA_FILE=""
 HDB_FILE=""
 CPU="EPYC-v4"
 CPU_FEATURES=""
@@ -29,6 +30,8 @@ SNP_FLAGS="0"
 SNP_UPM="1"
 DISCARD=""
 QEMU="./usr/local/bin/qemu-system-x86_64"
+
+KERNEL_FILE="/home/jinhang/unikraft/helloworld/workdir/build/helloworld_qemu-x86_64"
 
 usage() {
 	echo "$0 [options]"
@@ -430,6 +433,8 @@ if [ -n "$BRIDGE" ]; then
 else
 	add_opts "-netdev user,id=vmnic -device e1000,netdev=vmnic,romfile="
 fi
+
+#add_opts "-object memory-backend-memfd-private,id=mem0,size=4G"
 
 # log the console  output in stdout.log
 QEMU_CONSOLE_LOG=`pwd`/stdout.log

@@ -1,0 +1,17 @@
+./usr/local/bin/qemu-system-x86_64 \
+    -enable-kvm \
+    -cpu EPYC-v4,host-phys-bits=true \
+    -smp 4 \
+    -machine type=q35,confidential-guest-support=sev0,memory-backend=ram1,kvm-type=protected,vmport=off,svsm=/home/jinhang/linux-svsm/svsm.bin \
+    -object memory-backend-memfd-private,id=ram1,size=4G,share=true \
+    -object sev-snp-guest,id=sev0,policy=0x30000,cbitpos=51,reduced-phys-bits=1,init-flags=0x4,host-data=b2l3bmNvd3FuY21wbXA \
+    -drive if=pflash,format=raw,unit=0,file=/home/jinhang/linux-svsm/scripts/usr/local/share/qemu/OVMF_CODE.fd,readonly=on \
+    -drive if=pflash,format=raw,unit=1,file=./guest.fd \
+    -drive file=./guest.qcow2,if=none,id=disk0,format=qcow2 \
+    -device virtio-scsi-pci,id=scsi0,disable-legacy=on,iommu_platform=true \
+    -device scsi-hd,drive=disk0 \
+    -nographic \
+    -monitor pty \
+    -monitor unix:monitor,server,nowait \
+    -netdev user,id=vmnic \
+    -device e1000,netdev=vmnic,romfile=

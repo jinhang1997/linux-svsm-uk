@@ -65,3 +65,14 @@ dkms.conf
 # Others
 *.lds
 .prereq
+
+# Stuff related to execution
+*.log
+*.bin
+*.fd
+*.qcow2
+
+# SNP Components
+/scripts/snp-release-2023-12-04
+/scripts/linux
+/scripts/usr

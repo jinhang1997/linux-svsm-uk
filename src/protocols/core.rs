@@ -16,6 +16,9 @@ use x86_64::addr::{PhysAddr, VirtAddr};
 use x86_64::structures::paging::frame::PhysFrame;
 use x86_64::structures::paging::mapper::MapToError;
 
+use core::{ptr, slice};
+use core::str;
+
 /// 0
 const SVSM_CORE_REMAP_CA: u32 = 0;
 /// 1
@@ -30,6 +33,11 @@ const SVSM_CORE_DELETE_VCPU: u32 = 3;
 const SVSM_CORE_QUERY_PROTOCOL: u32 = 6;
 /// 7
 const SVSM_CORE_CONFIGURE_VTOM: u32 = 7;
+/// 16
+const SVSM_CUSTOM_MAKE_PAGE: u32 = 16;
+const SVSM_INIT_MEMREGION_PAGE: u32 = 17;
+/// 32
+const SVSM_CUSTOM_TEMP_PRINT: u32 = 32;
 
 #[derive(Clone, Copy, Debug)]
 struct VersionInfo {
@@ -559,7 +567,287 @@ unsafe fn handle_query_protocol_request(vmsa: *mut Vmsa) {
     (*vmsa).set_rcx(info);
 }
 
+
+// struct svsm_make_page_call {
+// 	__u64 pt_kernel;
+// 	__u64 va;
+// 	__u64 pa;
+// 	__u64 pages;
+// 	__u64 attr;
+// 	__u64 flags;
+// };
+
+#[derive(Clone, Copy)]
+#[repr(C, packed)]
+struct GuestPageTableRequest {
+    pt_kernel: u64,
+    pt_va: u64,
+    pt_pa: u64,
+    pages: u64,
+    attr: u64,
+    flags: u64,
+    pte_num: u64,
+}
+
+#[allow(dead_code)]
+impl GuestPageTableRequest {
+    funcs!(pt_kernel, u64);
+    funcs!(pt_va, u64);
+    funcs!(pt_pa, u64);
+    funcs!(pages, u64);
+    funcs!(attr, u64);
+    funcs!(flags, u64);
+    funcs!(pte_num, u64);
+}
+
+#[repr(C, packed)]
+struct GuestWritePTEEntry {
+    pt_paddr: u64,
+    lvl: u32,
+    idx: u32,
+    pte: u64,
+}
+
+#[allow(dead_code)]
+impl GuestWritePTEEntry {
+    funcs!(pt_paddr, u64);
+    funcs!(lvl, u32);
+    funcs!(idx, u32);
+    funcs!(pte, u64);
+}
+
+// static mut GPT: GuestPageTableEntry = GuestPageTableEntry::new(
+//      0x0, 0x0);
+
+const PG_MAX_LEVEL: u32 = 3;
+
+unsafe fn make_page_largest_level(len: u64, max_lvl: u32) -> u32 {
+    let mut lvl = max_lvl;
+    while lvl > 0 {
+        if lvl <= 2 && ((0x1 << (12 + (9 * (lvl)))) <= len)
+        {
+            return lvl;
+        }
+        lvl -= 1;
+    }
+    return lvl;
+}
+
+// use crate::mem::alloc::MemoryRegion;
+
+/* 
+ * Given a memory region, build a 4-level page table in this region
+ * RBX: memregion pstart
+ * RCX: memregion vstart
+ * RDX: memregion len
+ */
+unsafe fn handle_init_memregion_request(vmsa: *mut Vmsa) {
+    let _reta: u64 = 0xffffeeee00000000 as u64;
+    (*vmsa).set_rax(_reta);
+
+    // let region1 = MemoryRegion::new();
+
+}
+
+unsafe fn handle_make_page_request(vmsa: *mut Vmsa) {
+    let _rcx: u64 = (*vmsa).rcx() as u64;
+    let _reta: u64 = 0xffff0000eeee0000 as u64;
+    (*vmsa).set_rax(_reta);
+    // return;
+
+    // Handle request arguments
+    // RCX: SVSM Calling Area buffer
+    let req_args_gpa: PhysAddr = PhysAddr::new((*vmsa).rcx());
+    let req_args_map_res: Result<MapGuard, MapToError<_>> = match is_in_calling_area(req_args_gpa) {
+        true => MapGuard::new_private_persistent(req_args_gpa, CAA_MAP_SIZE),
+        false => MapGuard::new_private(req_args_gpa, CAA_MAP_SIZE),
+    };
+    let mut req_args_map: MapGuard = match req_args_map_res {
+        Ok(m) => m,
+        Err(_e) => return,
+    };
+    let request: &mut GuestPageTableRequest = req_args_map.as_object_mut();
+    let pt_kernel = request.pt_kernel();
+    let pt_va: u64 = request.pt_va();
+    let pt_pa = request.pt_pa();
+    let pages = request.pages();
+    let attr = request.attr();
+    let flags = request.flags();
+    let pte_num = request.pte_num();
+    prints!("SVSM: handle_make_page_request\r\n");
+    prints!("{:16} {:16} {:16} {:16} {:16} {:16} {:16}\r\n", "pt_kernel", "va", "pa", "pages", "attr", "flags", "entries");
+    prints!("{:016x} {:016x} {:016x} {:016x} {:016x} {:016x} {}\r\n", pt_kernel, pt_va, pt_pa, pages, attr, flags, pte_num);
+    // return;
+
+    // Start page walk from `pt_kernel`
+    // let gpa_pte_kpt: PhysAddr = PhysAddr::new(pt_kernel);
+    // let map_res_kpt: Result<MapGuard, MapToError<_>> = match is_in_calling_area(gpa_pte_kpt) {
+    //     true => MapGuard::new_private_persistent(gpa_pte_kpt, CAA_MAP_SIZE),
+    //     false => MapGuard::new_private(gpa_pte_kpt, CAA_MAP_SIZE),
+    // };
+    // let map_kpt: MapGuard = match map_res_kpt {
+    //     Ok(m) => m,
+    //     Err(_e) => return,
+    // };
+    // let va_kpt: VirtAddr = map_kpt.va();
+    // let ptr = va_kpt.as_ptr() as *const GuestPageTableEntry;
+    // let ptr_pa_u64 = gpa_pte_kpt.as_u64();
+    // let ptr_va_u64 = ptr as u64;
+    // prints!("ptr_pa_u64 {:016x} ptr_va_u64 {:016x}\r\n", ptr_pa_u64, ptr_va_u64);
+
+    let pt_kernel_gpa: PhysAddr = PhysAddr::new(pt_kernel);
+    let pt_kernel_map_res: Result<MapGuard, MapToError<_>> = match is_in_calling_area(pt_kernel_gpa) {
+        true => MapGuard::new_private_persistent(pt_kernel_gpa, CAA_MAP_SIZE),
+        false => MapGuard::new_private(pt_kernel_gpa, CAA_MAP_SIZE),
+    };
+    let pt_kernel_map: MapGuard = match pt_kernel_map_res {
+        Ok(m) => m,
+        Err(_e) => return,
+    };
+    let pt_kernel_va: VirtAddr = pt_kernel_map.va();
+    let pt_kernel_ptr = pt_kernel_va.as_ptr() as *const u64;
+    let pt_kernel_pte = &*pt_kernel_ptr & 0x0000007ffffff000;
+    prints!("pt_kernel_gpa {:016x} pt_kernel_va {:016x} pt_kernel_pte {:016x}\r\n", 
+        pt_kernel_gpa, pt_kernel_va, pt_kernel_pte);
+
+    unsafe {
+        let mut lvl = PG_MAX_LEVEL;
+        
+        let level: u32 = 3;
+        let mut max_lvl: u32 = 2;
+        // prints!("level {} < max_lvl {}\r\n", level, max_lvl);
+        if level < max_lvl
+        {
+            max_lvl = level;
+        }
+
+        let level: u32 = ((flags >> 4) & ((0x1 << 4) - 1)) as u32;
+        let len: u64 = pages * (0x1 << (12 + (9 * level)));
+        let to_lvl = make_page_largest_level(len, max_lvl);
+        // prints!("make_page_largest_level(len {:016x} max_lvl {}) -> to_lvl {}\r\n", len, max_lvl, to_lvl);
+        prints!("Start: lvl {} to_lvl {}\r\n", lvl, to_lvl);
+
+        // let entry = &*ptr;
+        // let mut gpte_pa_u64 = entry.get_pt_pbase();
+        let mut gpte_pa_u64 = pt_kernel_pte;
+        let mut pte_idx = ((pt_va) >> (12 + (9 * (lvl)))) & ((1 << 9) - 1);
+        
+        while lvl > to_lvl {
+            prints!("pte read: gpte_pa_u64 {:016x} lvl {} pte_idx {:016x}", gpte_pa_u64, lvl, pte_idx);
+    
+            let gpte_pa: PhysAddr = PhysAddr::new(gpte_pa_u64);
+            let map_res_gpte: Result<MapGuard, MapToError<_>> = match is_in_calling_area(gpte_pa) {
+                true => MapGuard::new_private_persistent(gpte_pa, CAA_MAP_SIZE),
+                false => MapGuard::new_private(gpte_pa, CAA_MAP_SIZE),
+            };
+            let gpte_mapguard: MapGuard = match map_res_gpte {
+                Ok(m) => m,
+                Err(_e) => return,
+            };
+            let gpte_va: VirtAddr = gpte_mapguard.va();
+            let gpte_ptr = gpte_va.as_ptr() as *const u64;
+            let idx_offset = pte_idx as usize;
+            let gpte = *(gpte_ptr.wrapping_add(idx_offset));
+            // let gpte_u64 = gpte.get_gpte();
+            prints!(" -> gpte {:016x}\r\n", gpte);
+
+            if 0x1 != gpte & 0x1 {
+                prints!("page not exist\r\n");
+                break;
+            }
+
+            gpte_pa_u64 = gpte & 0x0000007ffffff000;
+            lvl -= 1;
+            if lvl <= to_lvl
+            {
+                break;
+            }
+            pte_idx = ((pt_va) >> (12 + (9 * (lvl)))) & ((1 << 9) - 1);
+            // prints!("next: gpte_pa_u64 {:016x} pte_idx {:016x}\r\n", gpte_pa_u64, pte_idx);
+        }
+
+        let mut e_pa: PhysAddr = req_args_gpa + size_of::<GuestPageTableRequest>();
+        let mut req_pte_count = 0;
+        while req_pte_count < pte_num {
+            let map_res: Result<MapGuard, MapToError<_>> = match is_in_calling_area(e_pa) {
+                true => MapGuard::new_private_persistent(e_pa, CAA_MAP_SIZE),
+                false => MapGuard::new_private(e_pa, CAA_MAP_SIZE),
+            };
+            let map: MapGuard = match map_res {
+                Ok(m) => m,
+                Err(_e) => return,
+            };
+            let e: &GuestWritePTEEntry = map.as_object();
+            let pt_paddr = e.pt_paddr();
+            // let lvl = e.lvl();
+            let idx = e.idx() as u64;
+            let pte = e.pte();
+
+            req_pte_count += 1;
+            // prints!("#{}/{} pt_paddr {:016x} lvl {} idx {:08x} entry {:016x}\r\n", 
+            //     req_pte_count, pte_num, pt_paddr, lvl, idx, pte);
+
+            let pte_write_paddr_u64: u64 = pt_paddr + 8 * idx;
+            // prints!("write pte {:016x} to pa {:016x}\r\n", pte, pte_write_paddr_u64);
+
+            let pte_write_paddr = PhysAddr::new(pte_write_paddr_u64);
+            let pte_write_map_res: Result<MapGuard, MapToError<_>> = match is_in_calling_area(pte_write_paddr) {
+                true => MapGuard::new_private_persistent(pte_write_paddr, CAA_MAP_SIZE),
+                false => MapGuard::new_private(pte_write_paddr, CAA_MAP_SIZE),
+            };
+            let pte_write_map: MapGuard = match pte_write_map_res {
+                Ok(m) => m,
+                Err(_e) => return,
+            };
+            let pte_write_va = pte_write_map.va();
+            let pte_write_ptr: *const u64 = pte_write_va.as_ptr();
+            let pte_write_mut_ptr: *mut u64 = pte_write_ptr as *mut u64;
+            
+            ptr::write(pte_write_mut_ptr, pte);
+
+            e_pa += size_of::<GuestWritePTEEntry>();
+        }
+    }
+    
+    // prints!("End of request\r\n");
+    (*vmsa).set_cr3(pt_kernel);
+}
+
+unsafe fn handle_temp_print_request(vmsa: *mut Vmsa) {
+    // let rcx: u64 = (*vmsa).rcx() as u64;
+    let _reta: u64 = 0xffff0000eeee0000 as u64;
+
+    // prints!("SVSM: handle_temp_print_request string at {:016x}\r\n", rcx);
+
+    let gpa: PhysAddr = PhysAddr::new((*vmsa).rcx());
+    let map_res: Result<MapGuard, MapToError<_>> = match is_in_calling_area(gpa) {
+        true => MapGuard::new_private_persistent(gpa, CAA_MAP_SIZE),
+        false => MapGuard::new_private(gpa, CAA_MAP_SIZE),
+    };
+    let map: MapGuard = match map_res {
+        Ok(m) => m,
+        Err(_e) => return,
+    };
+
+    let va: VirtAddr = map.va();
+    let ptr = va.as_ptr() as *const u8;
+    let mut len = 0;
+    while *ptr.add(len) != 0 {
+        len += 1;
+    }
+    let slice = slice::from_raw_parts(ptr, len);
+
+    if let Ok(string) = str::from_utf8(slice) {
+        prints!("SVSM Printer: {}\r\n", string);
+    } else {
+        prints!("SVSM: Invalid UTF-8 string.");
+    }
+
+    (*vmsa).set_rax(_reta);
+}
+
 pub unsafe fn core_handle_request(callid: u32, vmsa: *mut Vmsa) {
+    // prints!("SVSM: receieved request {:016x}\r\n", callid);
     match callid {
         SVSM_CORE_QUERY_PROTOCOL => handle_query_protocol_request(vmsa),
         SVSM_CORE_REMAP_CA => handle_remap_ca_request(vmsa),
@@ -567,6 +855,10 @@ pub unsafe fn core_handle_request(callid: u32, vmsa: *mut Vmsa) {
         SVSM_CORE_CREATE_VCPU => handle_create_vcpu_request(vmsa),
         SVSM_CORE_DELETE_VCPU => handle_delete_vcpu_request(vmsa),
         SVSM_CORE_CONFIGURE_VTOM => handle_configure_vtom_request(vmsa),
+
+        SVSM_CUSTOM_MAKE_PAGE => handle_make_page_request(vmsa),
+        SVSM_CUSTOM_TEMP_PRINT => handle_temp_print_request(vmsa),
+        SVSM_INIT_MEMREGION_PAGE => handle_init_memregion_request(vmsa),
 
         _ => (*vmsa).set_rax(SVSM_ERR_UNSUPPORTED_CALLID),
     };
